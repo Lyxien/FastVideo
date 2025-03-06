@@ -238,8 +238,9 @@ def main(args):
             x = torchvision.utils.make_grid(x, nrow=6)
             x = x.transpose(0, 1).transpose(1, 2).squeeze(-1)
             outputs.append((x * 255).numpy().astype(np.uint8))
-        os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-        imageio.mimsave(os.path.join(args.output_path, f"{prompt[:100]}.mp4"), outputs, fps=args.fps)
+        # os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
+        os.makedirs(args.output_path, exist_ok=True)
+        imageio.mimsave(os.path.join(args.output_path, f"{prompt}-0.mp4"), outputs, fps=args.fps)
 
 
 if __name__ == "__main__":
