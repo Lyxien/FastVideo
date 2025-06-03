@@ -146,7 +146,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         raise NotImplementedError(
             "Training pipeline must implement this method")
 
-    def _log_validation(self, transformer, training_args, global_step) -> None:
+    def _log_validation(self, transformer, training_args, global_step, custom_output_dir=None, noise_random_generator=None, use_no_grad=False) -> None:
         assert training_args is not None
         training_args.inference_mode = True
         training_args.use_cpu_offload = False
@@ -157,15 +157,24 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
 
         logger.info("Starting validation")
 
+        # Use custom output directory if provided, otherwise use training_args.output_dir
+        output_dir = custom_output_dir if custom_output_dir is not None else training_args.output_dir
+
         # Create sampling parameters if not provided
         sampling_param = SamplingParam.from_pretrained(training_args.model_path)
 
-        # Set deterministic seed for validation
-        validation_seed = training_args.seed if training_args.seed is not None else 42
-        torch.manual_seed(validation_seed)
-        torch.cuda.manual_seed_all(validation_seed)
-
-        logger.info("Using validation seed: %s", validation_seed)
+        # Handle random seed setup
+        if noise_random_generator is not None:
+            # Use the provided noise random generator AS IS (preserving its current state)
+            # Don't reset global seeds - let the generator's current state be used
+            validation_seed = None  # Will use generator directly
+            logger.info("Using noise_random_generator current state (no fixed seed)")
+        else:
+            # Fall back to fixed seed behavior for backward compatibility
+            validation_seed = training_args.seed if training_args.seed is not None else 42
+            torch.manual_seed(validation_seed)
+            torch.cuda.manual_seed_all(validation_seed)
+            logger.info("Using fixed validation seed: %s", validation_seed)
 
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_prompt_dir: %s',
@@ -236,16 +245,21 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 eta=0.0,
             )
 
+            # Pass the noise generator to the validation pipeline if provided
+            # This allows validation to use the current state of the generator
+            if noise_random_generator is not None:
+                batch.generator = noise_random_generator
+
             # Run validation inference
-            with torch.inference_mode(), torch.autocast("cuda",
-                                                        dtype=torch.bfloat16):
+            context_manager = torch.no_grad() if use_no_grad else torch.inference_mode()
+            with context_manager, torch.autocast("cuda", dtype=torch.bfloat16):
                 output_batch = self.validation_pipeline.forward(
                     batch, training_args)
                 samples = output_batch.output
 
-            # Re-enable gradients for training
-            transformer.requires_grad_(True)
-            transformer.train()
+            # # Re-enable gradients for training
+            # transformer.requires_grad_(False)
+            # transformer.train()
 
             if self.rank_in_sp_group != 0:
                 continue
@@ -282,9 +296,9 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
                 video_filenames = []
                 for i, (video,
                         caption) in enumerate(zip(all_videos, all_captions)):
-                    os.makedirs(training_args.output_dir, exist_ok=True)
+                    os.makedirs(output_dir, exist_ok=True)
                     filename = os.path.join(
-                        training_args.output_dir,
+                        output_dir,
                         f"validation_step_{global_step}_video_{i}.mp4")
                     imageio.mimsave(filename, video, fps=sampling_param.fps)
                     video_filenames.append(filename)

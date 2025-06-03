@@ -31,6 +31,11 @@ logger = init_logger(__name__)
 # Manual gradient checking flag - set to True to enable gradient verification
 ENABLE_GRADIENT_CHECK = False
 
+# Checkpoint drift testing flag - set to True to enable drift testing
+ENABLE_CHECKPOINT_DRIFT_TEST = False
+# How often to test for checkpoint drift (in steps)
+CHECKPOINT_DRIFT_TEST_INTERVAL = 100
+
 
 class WanTrainingPipeline(TrainingPipeline):
     """
@@ -246,6 +251,13 @@ class WanTrainingPipeline(TrainingPipeline):
             if resumed_step > 0:
                 self.init_steps = resumed_step
                 logger.info("Successfully resumed from step %s", resumed_step)
+                
+                # Run validation for the checkpoint step to align with fresh training
+                # Use no_grad instead of inference_mode to avoid tensor state issues
+                if (self.training_args.log_validation and 
+                    resumed_step % self.training_args.validation_steps == 0):
+                    logger.info("Running validation for checkpoint step %s", resumed_step)
+                    self._log_validation(self.transformer, self.training_args, resumed_step, use_no_grad=True)
             else:
                 logger.warning(
                     "Failed to load checkpoint, starting from step 0")
@@ -324,24 +336,116 @@ class WanTrainingPipeline(TrainingPipeline):
                     },
                     step=step,
                 )
-            if step % self.training_args.checkpointing_steps == 0:
+            if step >= 5 and step % self.training_args.checkpointing_steps == 0:
                 save_checkpoint(self.transformer, self.rank,
                                 self.training_args.output_dir, step,
                                 self.optimizer, self.train_dataloader,
                                 self.lr_scheduler, noise_random_generator)
                 self.transformer.train()
                 self.sp_group.barrier()
-            if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
+            #if self.training_args.log_validation and step % self.training_args.validation_steps == 0:
                 self._log_validation(self.transformer, self.training_args, step)
+            
+            # Checkpoint drift testing - only if enabled and at specified intervals
+            if (ENABLE_CHECKPOINT_DRIFT_TEST and 
+                step > 0 and 
+                step % CHECKPOINT_DRIFT_TEST_INTERVAL == 0):
+                logger.info("Running checkpoint drift test at step %s", step)
+                self.test_checkpoint_drift(step, noise_random_generator)
 
         save_checkpoint(self.transformer, self.rank,
                         self.training_args.output_dir,
                         self.training_args.max_train_steps, self.optimizer,
                         self.train_dataloader, self.lr_scheduler,
                         noise_random_generator)
+        # self._log_validation(self.transformer, self.training_args, 5)
 
         if get_sp_group():
             cleanup_dist_env_and_memory()
+
+    def test_checkpoint_drift(self, step: int) -> None:
+        """
+        Test for checkpoint drift by saving and immediately loading the same checkpoint
+        multiple times, then running validation to detect any changes in model state.
+        
+        Args:
+            step: Current training step
+            noise_random_generator: Random number generator for noise sampling
+        """
+        logger.info("Testing checkpoint drift at step %s - running 5 iterations", step)
+
+        noise_random_generator = torch.Generator(device="cpu")
+        noise_random_generator.manual_seed(42)
+        
+        # Load the initial checkpoint-5 before starting drift test
+        initial_checkpoint_path = f"{self.training_args.output_dir}/checkpoint-5"
+        logger.info("Loading initial checkpoint from %s", initial_checkpoint_path)
+        loaded_step = load_checkpoint(
+            self.transformer, 
+            self.rank,
+            initial_checkpoint_path, 
+            self.optimizer,
+            self.train_dataloader, 
+            self.lr_scheduler,
+            noise_random_generator
+        )
+        
+        if loaded_step > 0:
+            logger.info("Successfully loaded initial checkpoint from step %s", loaded_step)
+        else:
+            logger.warning("Failed to load initial checkpoint from %s", initial_checkpoint_path)
+        
+        # Run 5 iterations of save/load/validate
+        for iteration in range(1, 6):
+            logger.info("=== CHECKPOINT DRIFT TEST ITERATION %s/5 ===", iteration)
+            
+            # Save current checkpoint with iteration number
+            checkpoint_dir = f"{self.training_args.output_dir}/checkpoint_{step}_{iteration}/checkpoint-5"
+            logger.info("Saving checkpoint %s to %s", iteration, checkpoint_dir)
+            save_checkpoint(
+                self.transformer, 
+                self.rank,
+                checkpoint_dir, 
+                step,
+                self.optimizer, 
+                self.train_dataloader,
+                self.lr_scheduler, 
+                noise_random_generator
+            )
+            
+            # Load the checkpoint back
+            logger.info("Loading checkpoint %s from %s", iteration, checkpoint_dir)
+            loaded_step = load_checkpoint(
+                self.transformer, 
+                self.rank,
+                checkpoint_dir, 
+                self.optimizer,
+                self.train_dataloader, 
+                self.lr_scheduler,
+                noise_random_generator
+            )
+            
+            if loaded_step != step:
+                logger.warning("Iteration %s: Loaded step %s doesn't match expected step %s", 
+                             iteration, loaded_step, step)
+            else:
+                logger.info("Iteration %s: Successfully loaded checkpoint at step %s", 
+                          iteration, loaded_step)
+            
+            logger.info("=== VALIDATION FOR ITERATION %s ===", iteration)
+            # Run validation for this iteration with custom output dir and noise generator
+            # Create a copy of the generator to avoid consuming its state during validation
+            generator_copy = torch.Generator(device=noise_random_generator.device)
+            generator_copy.set_state(noise_random_generator.get_state())
+            
+            custom_dir = f"{self.training_args.output_dir}/drift_test_step_{step}_iteration_{iteration}"
+            self._log_validation(self.transformer, self.training_args, step, 
+                               custom_output_dir=custom_dir, 
+                               noise_random_generator=generator_copy)
+            
+            logger.info("Completed iteration %s/5", iteration)
+        
+        logger.info("Checkpoint drift test completed at step %s - saved 5 checkpoints and generated 5 validation sets", step)
 
 
 def main(args) -> None:
@@ -351,7 +455,9 @@ def main(args) -> None:
         args.pretrained_model_name_or_path, args=args)
     args = pipeline.training_args
     pipeline.forward(None, args)
+    # pipeline.test_checkpoint_drift(5)
     logger.info("Training pipeline done")
+
 
 
 if __name__ == "__main__":
