@@ -160,6 +160,7 @@ def save_checkpoint(transformer,
                     rank,
                     weight_path,
                     local_main_process_only=False)
+        # torch.distributed.breakpoint()
         save_file(cpu_state, weight_path)
         logger.info("rank: %s, consolidated checkpoint saved to %s",
                     rank,

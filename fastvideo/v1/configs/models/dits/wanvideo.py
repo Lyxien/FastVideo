@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
+import re
 
 from fastvideo.v1.configs.models.dits.base import DiTArchConfig, DiTConfig
 
@@ -94,6 +95,20 @@ class WanVideoArchConfig(DiTArchConfig):
         self.hidden_size = self.num_attention_heads * self.attention_head_dim
         self.num_channels_latents = self.in_channels if self.added_kv_proj_dim is None else self.out_channels
 
+    def _get_reverse_mapping(self) -> dict:
+        """Dynamically generate reverse mapping from the original mapping."""
+        reverse_mapping = {}
+        for old_pattern, new_pattern in self._param_names_mapping.items():
+            # Convert regex patterns to reverse mapping
+            # Handle special cases for numbered groups
+            new_pattern = new_pattern.replace(r"\1", r"(\d+)")
+            new_pattern = new_pattern.replace(r"\2", r"(.*)")
+            old_pattern = old_pattern.replace(r"\1", r"(\d+)")
+            old_pattern = old_pattern.replace(r"\2", r"(.*)")
+            
+            # Create reverse pattern
+            reverse_mapping[new_pattern] = old_pattern
+        return reverse_mapping
 
 @dataclass
 class WanVideoConfig(DiTConfig):
