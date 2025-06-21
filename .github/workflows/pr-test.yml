@@ -12,12 +12,14 @@ on:
     paths:
       - "fastvideo/**/*.py"
       - ".github/workflows/pr-test.yml"
+      - "pyproject.toml"
+      - "docker/Dockerfile.python3.12"
   workflow_dispatch:
     inputs:
       custom_image:
-        description: "Custom image from this repository (default: fastvideo-dev:latest)"
+        description: "Custom image from this repository (default: fastvideo-dev:py3.12-latest)"
         required: false
-        default: "fastvideo-dev:latest"
+        default: "fastvideo-dev:py3.12-latest"
         type: string
       run_encoder_test:
         description: "Run encoder-test"
@@ -44,6 +46,21 @@ on:
         required: false
         default: false
         type: boolean
+      run_training_test_VSA:
+        description: "Run training-test-VSA"
+        required: false
+        default: false
+        type: boolean
+      run_inference_test_STA:
+        description: "Run inference-test-STA"
+        required: false
+        default: false
+        type: boolean
+      run_nightly_test:
+        description: "Run nightly-test"
+        required: false
+        default: false
+        type: boolean
 
 env:
   PYTHONUNBUFFERED: "1"
@@ -65,6 +82,8 @@ jobs:
       vae-test: ${{ steps.filter.outputs.vae-test }}
       transformer-test: ${{ steps.filter.outputs.transformer-test }}
       training-test: ${{ steps.filter.outputs.training-test }}
+      training-test-VSA: ${{ steps.filter.outputs.training-test-VSA }}
+      inference-test-STA: ${{ steps.filter.outputs.inference-test-STA }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -75,18 +94,34 @@ jobs:
               - 'fastvideo/v1/models/encoders/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/encoders/**'
+              - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
             vae-test:
               - 'fastvideo/v1/models/vaes/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/vaes/**'
+              - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
             transformer-test:
               - 'fastvideo/v1/models/dits/**'
               - 'fastvideo/v1/models/loaders/**'
               - 'fastvideo/v1/tests/transformers/**'
               - 'fastvideo/v1/layers/**'
               - 'fastvideo/v1/attention/**'
+              - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
             training-test:
               - 'fastvideo/v1/**'
+              - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
+            training-test-VSA:
+              - 'fastvideo/v1/**'
+              - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
+            inference-test-STA:
+              - 'fastvideo/v1/**'
+              - 'pyproject.toml'
+              - 'docker/Dockerfile.python3.12'
 
   encoder-test:
     needs: change-filter
@@ -99,8 +134,8 @@ jobs:
       gpu_type: "NVIDIA A40"
       gpu_count: 1
       volume_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/encoders -s"
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/encoders -s"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -117,8 +152,8 @@ jobs:
       gpu_type: "NVIDIA A40"
       gpu_count: 1
       volume_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/vaes -s"
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/vaes -s"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -135,8 +170,8 @@ jobs:
       gpu_type: "NVIDIA L40S"
       gpu_count: 1
       volume_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/transformers -s"
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/transformers -s"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -163,7 +198,7 @@ jobs:
       volume_size: 200
       disk_size: 200
       image: "ghcr.io/${{ github.repository }}/fastvideo-dev:${{ matrix.python-version.tag }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/ssim -vs"
       timeout_minutes: 60
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
@@ -181,12 +216,70 @@ jobs:
       gpu_count: 4
       volume_size: 100
       disk_size: 100
-      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:latest' }}"
-      test_command: "pip install -e .[test] && pytest ./fastvideo/v1/tests/training -srP"
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training/Vanilla -srP"
       timeout_minutes: 30
     secrets:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+
+  training-test-VSA:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_training_test_VSA == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "training-test-VSA"
+      gpu_type: "NVIDIA H100 NVL"
+      gpu_count: 1
+      volume_size: 100
+      disk_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/training/VSA -srP"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+
+  inference-test-STA:
+    needs: change-filter
+    if: >-
+      (github.event_name != 'workflow_dispatch' && github.event.pull_request.draft == false) || 
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_inference_test_STA == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "inference-test-STA"
+      gpu_type: "NVIDIA H100 NVL"
+      gpu_count: 1
+      volume_size: 100
+      disk_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      test_command: "uv pip install -e .[test] && pytest ./fastvideo/v1/tests/inference/STA -srP"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+
+  nightly-test:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.run_nightly_test == 'true')
+    uses: ./.github/workflows/runpod-test.yml
+    with:
+      job_id: "nightly-test"
+      gpu_type: "NVIDIA A40"
+      gpu_count: 4
+      volume_size: 100
+      disk_size: 100
+      image: "ghcr.io/${{ github.repository }}/${{ github.event.inputs.custom_image || 'fastvideo-dev:py3.12-latest' }}"
+      test_command: "wandb login $WANDB_API_KEY && uv pip install -e .[test] && pytest ./fastvideo/v1/tests/nightly/test_e2e_overfit_single_sample.py -vs"
+      timeout_minutes: 30
+    secrets:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      RUNPOD_PRIVATE_KEY: ${{ secrets.RUNPOD_PRIVATE_KEY }}
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
   runpod-cleanup:
     needs: [encoder-test, vae-test, transformer-test, ssim-test] # Add other jobs to this list as you create them
