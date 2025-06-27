@@ -21,7 +21,7 @@ import fastvideo.v1.envs as envs
 from fastvideo.v1.attention.backends.video_sparse_attn import (
     VideoSparseAttentionMetadata)
 from fastvideo.v1.configs.sample import SamplingParam
-from fastvideo.v1.dataset import build_parquet_map_style_dataloader
+from fastvideo.v1.dataset import build_parquet_iterable_style_dataloader
 from fastvideo.v1.dataset.dataloader.schema import (
     pyarrow_schema_t2v, pyarrow_schema_t2v_validation)
 from fastvideo.v1.distributed import (cleanup_dist_env_and_memory, get_sp_group,
@@ -109,7 +109,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
             last_epoch=self.init_steps - 1,
         )
 
-        self.train_dataset, self.train_dataloader = build_parquet_map_style_dataloader(
+        self.train_dataset, self.train_dataloader = build_parquet_iterable_style_dataloader(
             training_args.data_path,
             training_args.train_batch_size,
             parquet_schema=self.train_dataset_schema,
@@ -608,7 +608,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         # Prepare validation prompts
         logger.info('fastvideo_args.validation_preprocessed_path: %s',
                     training_args.validation_preprocessed_path)
-        validation_dataset, validation_dataloader = build_parquet_map_style_dataloader(
+        validation_dataset, validation_dataloader = build_parquet_iterable_style_dataloader(
             training_args.validation_preprocessed_path,
             batch_size=1,
             parquet_schema=self.validation_dataset_schema,
