@@ -23,7 +23,7 @@ class BaseLayerWithLoRA(nn.Module):
         self,
         base_layer: nn.Module,
         lora_rank: Optional[int] = None,
-        lora_alpha: Optional[int] = -1,
+        lora_alpha: Optional[int] = None,
         training_mode: bool = False,
     ):
         super().__init__()
@@ -43,7 +43,7 @@ class BaseLayerWithLoRA(nn.Module):
         if training_mode:
             self.base_layer.requires_grad_(False)
 
-        if self.lora_rank is not None and self.lora_alpha == -1:
+        if self.lora_rank is not None and self.lora_alpha is None:
             self.lora_alpha = lora_rank
 
     @torch.compile()
@@ -185,7 +185,7 @@ class ColumnParallelLinearWithLoRA(BaseLayerWithLoRA):
         self,
         base_layer: ColumnParallelLinear,
         lora_rank: Optional[int] = None,
-        lora_alpha: Optional[int] = -1,
+        lora_alpha: Optional[int] = None,
         training_mode: bool = False,
     ) -> None:
         super().__init__(base_layer, lora_rank, lora_alpha, training_mode)
@@ -220,7 +220,7 @@ class MergedColumnParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
         self,
         base_layer: MergedColumnParallelLinear,
         lora_rank: Optional[int] = None,
-        lora_alpha: Optional[int] = -1,
+        lora_alpha: Optional[int] = None,
         training_mode: bool = False,
     ) -> None:
         super().__init__(base_layer, lora_rank, lora_alpha, training_mode)
@@ -243,7 +243,7 @@ class QKVParallelLinearWithLoRA(ColumnParallelLinearWithLoRA):
         self,
         base_layer: QKVParallelLinear,
         lora_rank: Optional[int] = None,
-        lora_alpha: Optional[int] = -1,
+        lora_alpha: Optional[int] = None,
         training_mode: bool = False,
     ) -> None:
         super().__init__(base_layer, lora_rank, lora_alpha, training_mode)
@@ -277,7 +277,7 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
         self,
         base_layer: RowParallelLinear,
         lora_rank: Optional[int] = None,
-        lora_alpha: Optional[int] = -1,
+        lora_alpha: Optional[int] = None,
         training_mode: bool = False,
     ) -> None:
         super().__init__(base_layer, lora_rank, lora_alpha, training_mode)
@@ -326,7 +326,7 @@ class RowParallelLinearWithLoRA(BaseLayerWithLoRA):
 def get_lora_layer(
         layer: nn.Module,
         lora_rank: Optional[int] = None,
-        lora_alpha: Optional[int] = -1,
+        lora_alpha: Optional[int] = None,
         training_mode: bool = False) -> Union[BaseLayerWithLoRA, None]:
     supported_layer_types: Dict[Type[LinearBase], Type[BaseLayerWithLoRA]] = {
         # the order matters

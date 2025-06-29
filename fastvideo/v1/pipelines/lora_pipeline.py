@@ -35,7 +35,7 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_path: Optional[Union[str, None]] = None
     lora_nickname: Optional[str] = "default"
     lora_rank: Optional[int] = None
-    lora_alpha: Optional[int] = -1
+    lora_alpha: Optional[int] = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -73,11 +73,12 @@ class LoRAPipeline(ComposedPipelineBase):
 
     def convert_to_lora_layers(self) -> None:
         """
-        Converts the transformer to a LoRA transformer.
+        Unified method to convert the transformer to a LoRA transformer.
         """
 
         for name, layer in self.modules["transformer"].named_modules():
             if not self.is_target_layer(name):
+                layer.requires_grad_(False)
                 continue
 
             excluded = False
