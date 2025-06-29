@@ -26,6 +26,7 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_adapters: Dict[str, Dict[str, torch.Tensor]] = defaultdict(
         dict)  # state dicts of loaded lora adapters
     cur_adapter_name: str = ""
+    cur_adapter_path: str = ""
     lora_layers: Dict[str, BaseLayerWithLoRA] = {}
     fastvideo_args: Union[FastVideoArgs, TrainingArgs]
     exclude_lora_layers: List[str] = []
@@ -33,6 +34,8 @@ class LoRAPipeline(ComposedPipelineBase):
     lora_target_modules: Optional[List[str]] = None
     lora_path: Optional[Union[str, None]] = None
     lora_nickname: Optional[str] = "default"
+    lora_rank: Optional[int] = None
+    lora_alpha: Optional[int] = -1
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -42,10 +45,10 @@ class LoRAPipeline(ComposedPipelineBase):
         self.lora_path = self.fastvideo_args.lora_path
         self.lora_nickname = self.fastvideo_args.lora_nickname
         self.training_mode = self.fastvideo_args.training_mode
-        if self.training_mode and not self.fastvideo_args.lora_training:
-            return
 
         if self.training_mode:
+            if not self.fastvideo_args.lora_training:
+                return
             self.lora_rank = self.fastvideo_args.lora_rank  # type: ignore
             self.lora_alpha = self.fastvideo_args.lora_alpha  # type: ignore
             if self.lora_target_modules is None:
@@ -54,12 +57,13 @@ class LoRAPipeline(ComposedPipelineBase):
                     "q_proj", "k_proj", "v_proj", "o_proj", "to_q", "to_k",
                     "to_v", "to_out", "to_qkv"
                 ]
-
-        self.convert_to_lora_layers()
-        if self.lora_path is not None:
-            self.set_lora_adapter(
-                self.lora_nickname,  # type: ignore
-                self.lora_path)  # type: ignore
+            self.convert_to_lora_layers()
+        else:
+            self.convert_to_lora_layers()
+            if self.lora_path is not None:
+                self.apply_lora_adapter(
+                    self.lora_nickname,  # type: ignore
+                    self.lora_path)  # type: ignore
 
     def is_target_layer(self, module_name: str) -> bool:
         if self.lora_target_modules is None:
@@ -84,16 +88,19 @@ class LoRAPipeline(ComposedPipelineBase):
             if excluded:
                 continue
 
-            layer = get_lora_layer(layer)
+            layer = get_lora_layer(layer,
+                                   lora_rank=self.lora_rank,
+                                   lora_alpha=self.lora_alpha,
+                                   training_mode=self.training_mode)
             if layer is not None:
                 self.lora_layers[name] = layer
                 replace_submodule(self.modules["transformer"], name, layer)
 
-    def set_lora_adapter(self,
-                         lora_nickname: str,
-                         lora_path: Optional[str] = None):  # type: ignore
+    def apply_lora_adapter(self,
+                           lora_nickname: str,
+                           lora_path: Optional[str] = None):  # type: ignore
         """
-        Loads a LoRA adapter into the pipeline and applies it to the transformer.
+        Load a LoRA adapter into the pipeline and merge it into the transformer.
         Args:
             lora_nickname: The "nick name" of the adapter when referenced in the pipeline.
             lora_path: The path to the adapter, either a local path or a Hugging Face repo id.
@@ -103,9 +110,10 @@ class LoRAPipeline(ComposedPipelineBase):
             raise ValueError(
                 f"Adapter {lora_nickname} not found in the pipeline. Please provide lora_path to load it."
             )
+        self.cur_adapter_name = lora_nickname
         adapter_updated = False
         rank = dist.get_rank()
-        if lora_path is not None:
+        if lora_path is not None and lora_path != self.cur_adapter_path:
             lora_local_path = maybe_download_lora(lora_path)
             lora_state_dict = load_file(lora_local_path)
 
@@ -141,9 +149,10 @@ class LoRAPipeline(ComposedPipelineBase):
                 self.lora_adapters[lora_nickname][target_name] = weight.to(
                     self.device)
             adapter_updated = True
+            self.cur_adapter_path = lora_path
             logger.info("Rank %d: loaded LoRA adapter %s", rank, lora_path)
 
-        if not adapter_updated and lora_nickname == self.cur_adapter_name:
+        if not adapter_updated:
             return
 
         # Merge the new adapter
@@ -168,4 +177,3 @@ class LoRAPipeline(ComposedPipelineBase):
                 layer.disable_lora = True
         logger.info("Rank %d: LoRA adapter %s applied to %d layers", rank,
                     lora_path, adapted_count)
-        self.cur_adapter_name = lora_nickname
