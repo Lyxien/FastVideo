@@ -460,7 +460,7 @@ class TrainingArgs(FastVideoArgs):
 
     # LoRA training parameters
     lora_rank: Optional[int] = None
-    lora_alpha: Optional[int] = None
+    lora_alpha: Optional[int] = -1
 
     @classmethod
     def from_cli_args(cls, args: argparse.Namespace) -> "TrainingArgs":
