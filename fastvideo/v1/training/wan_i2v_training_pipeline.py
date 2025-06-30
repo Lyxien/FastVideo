@@ -19,6 +19,7 @@ from fastvideo.v1.pipelines.wan.wan_i2v_pipeline import (
     WanImageToVideoValidationPipeline)
 from fastvideo.v1.training.training_pipeline import TrainingPipeline
 from fastvideo.v1.utils import is_vsa_available
+from fastvideo.v1.training.training_utils import shard_latents_across_sp
 
 vsa_available = is_vsa_available()
 
@@ -115,7 +116,9 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         image_latents = training_batch.image_latents.to(get_torch_device(),
                                                         dtype=torch.bfloat16)
 
-        batch_size, num_frames, latent_height, latent_width = image_latents.shape
+        temporal_compression_ratio = 4
+        num_frames = self.training_args.num_frames
+        batch_size, num_channels, _, latent_height, latent_width = image_latents.shape
         mask_lat_size = torch.ones(batch_size, 1, num_frames, latent_height,
                                    latent_width)
         mask_lat_size[:, :, list(range(1, num_frames))] = 0
@@ -124,15 +127,18 @@ class WanI2VTrainingPipeline(TrainingPipeline):
         first_frame_mask = torch.repeat_interleave(
             first_frame_mask,
             dim=2,
-            repeats=self.get_module("vae").temporal_compression_ratio)
+            repeats=temporal_compression_ratio)
         mask_lat_size = torch.concat(
             [first_frame_mask, mask_lat_size[:, :, 1:, :]], dim=2)
         mask_lat_size = mask_lat_size.view(
             batch_size, -1,
-            self.get_module("vae").temporal_compression_ratio, latent_height,
+            temporal_compression_ratio, latent_height,
             latent_width)
         mask_lat_size = mask_lat_size.transpose(1, 2)
-        mask_lat_size = mask_lat_size.to(image_latents.device)
+        mask_lat_size = mask_lat_size.to(image_latents.device).to(
+            dtype=torch.bfloat16)
+
+        mask_lat_size = shard_latents_across_sp(mask_lat_size, self.training_args.num_latent_t)
 
         training_batch.noisy_model_input = torch.cat(
             [training_batch.noisy_model_input, mask_lat_size, image_latents],
