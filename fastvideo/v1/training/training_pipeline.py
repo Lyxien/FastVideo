@@ -86,6 +86,7 @@ class TrainingPipeline(ComposedPipelineBase, ABC):
         self.transformer.train()
 
         if training_args.gradient_checkpointing:
+            print("****************************Applying activation checkpointing to the transformer")
             self.transformer = apply_activation_checkpointing(
                 self.transformer,
                 checkpointing_type=training_args.gradient_checkpointing_type)
